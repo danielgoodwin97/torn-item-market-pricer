@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn - Item Market Pricer
 // @namespace    https://github.com/danielgoodwin97/torn-item-market-pricer
-// @version      2.0.1
+// @version      2.0.2
 // @description  Automatically price items in the item market.
 // @author       FATU [1482556]
 // @match        *.torn.com/page.php?sid=ItemMarket*
@@ -389,11 +389,15 @@ $(() => {
             var self = this;
 
             $.ajax({
-                url: 'https://api.torn.com/v2/market/' + id,
+                url: `https://api.torn.com/v2/market/${id}/itemmarket`,
+
+                headers: {
+                    Accept: 'application/json',
+                    Authorization: `ApiKey ${options.key.value}`
+                },
 
                 data: {
-                    selections: 'bazaar,itemmarket',
-                    key: options.key.value
+                    limit: 1
                 },
 
                 /**
@@ -408,14 +412,11 @@ $(() => {
                  * @param data {object} | Torn API response.
                  */
                 success: function (data) {
-                    var {itemmarket} = data,
-                        allPrices = _.without(_.concat(itemmarket.listings || []), null),
-                        cheapestItem = _.min(_.toArray(_.mapValues(allPrices, function (value) {
-                            return value.price;
-                        })));
+                    var { itemmarket } = data,
+                        [{ price }] = itemmarket.listings || [{}];
 
                     // Set price to sell as a dollar lower.
-                    self.items[id].price = cheapestItem + parseInt(options.priceModifier.value);
+                    self.items[id].price = price + parseInt(options.priceModifier.value);
                 },
 
                 /**
