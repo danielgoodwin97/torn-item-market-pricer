@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn - Item Market Pricer
 // @namespace    https://github.com/danielgoodwin97/torn-item-market-pricer
-// @version      2.0.2
+// @version      2.1
 // @description  Automatically price items in the item market.
 // @author       FATU [1482556]
 // @match        *.torn.com/page.php?sid=ItemMarket*
@@ -449,39 +449,86 @@ $(() => {
                 },
 
                 /**
-                 * When all pricing is finished, hide the loader and add final prices to inputs.
+                 * When all pricing is finished, expand groups and add final prices to inputs.
                  */
                 complete: function () {
                     if (self.isFinished()) {
-                        self.loader.hide();
-                        self.applyPricesAndQuantities();
+                        // Expand all groups before applying prices, then hide loader.
+                        self.expandAllGroups().then(function () {
+                            return self.applyPricesAndQuantities();
+                        }).then(function () {
+                            self.loader.hide();
+                        });
                     }
                 }
             });
         },
 
         /**
-         * Grab price inputs for inventory items.
-         * @param name {string} | Item name.
-         * @param id {number} | Item ID.
+         * Expand all grouped item rows by clicking .group-arrow elements.
+         * Handles page re-renders by checking for remaining arrows after each click.
+         * Scrolls the page to ensure virtualized elements are rendered.
+         * @returns {Promise} | Resolves when all groups are expanded.
          */
-        getInputs: function (name, id) {
-            var self = this,
-                item = $('[class^="itemRowWrapper___"]');
+        expandAllGroups: function () {
+            var self = this;
 
-            // Rather than using IDs we now have to use item names due to the image canvas update which removed
-            // the ability to grab IDs from the URLs.
-            item.each(function () {
-                var currentItem = $(this),
-                    itemName = currentItem.find('[class^="name___"]').text();
+            return new Promise(function (resolve) {
+                function scrollAndExpand() {
+                    var scrollContainer = document.documentElement,
+                        scrollHeight = scrollContainer.scrollHeight,
+                        currentScroll = 0,
+                        scrollStep = window.innerHeight;
 
-                // Add inputs to item object.
-                if (name === itemName) {
-                    self.items[id].inputs = {
-                        price: currentItem.find('[class^="priceInputWrapper___"] input:not([type="hidden"])'),
-                        quantity: currentItem.find('[class^="amountInputWrapper___"] input:not([type="hidden"]), [class^="checkboxWrapper___"] [id*="selectCheckbox"]')
-                    };
+                    // Scroll through the entire page to render all elements.
+                    function scrollNext() {
+                        currentScroll += scrollStep;
+
+                        // Update loader message.
+                        self.loader.update('Scanning for item groups...');
+
+                        if (currentScroll < scrollHeight) {
+                            window.scrollTo(0, currentScroll);
+                            setTimeout(scrollNext, 100);
+                        } else {
+                            // Scroll back to top.
+                            window.scrollTo(0, 0);
+
+                            // Now check for arrows.
+                            setTimeout(expandNext, 100);
+                        }
+                    }
+
+                    scrollNext();
                 }
+
+                function expandNext() {
+                    // Scroll to find any arrows that might be virtualized.
+                    var arrow = $('.group-arrow').first();
+
+                    // If no more arrows, we're done.
+                    if (!arrow.length) {
+                        window.scrollTo(0, 0);
+                        resolve();
+                        return;
+                    }
+
+                    // Update loader message.
+                    self.loader.update('Expanding item groups...');
+
+                    // Scroll the arrow into view before clicking.
+                    arrow[0].scrollIntoView({ behavior: 'instant', block: 'center' });
+
+                    // Click the arrow after a brief delay.
+                    setTimeout(function () {
+                        arrow.click();
+
+                        // Wait for re-render, then check again.
+                        setTimeout(expandNext, 1000);
+                    }, 100);
+                }
+
+                scrollAndExpand();
             });
         },
 
@@ -500,43 +547,104 @@ $(() => {
          * Apply prices to price fields.
          */
         applyPricesAndQuantities: function () {
-            var self = this;
+            var self = this,
+                {setPrices, setQuantities} = options,
+                processedElements = new WeakSet();
 
-            _.each(this.items, function (value, key) {
-                self.getInputs(value.name, key);
+            /**
+             * Process all currently visible item rows.
+             */
+            function processVisibleItems() {
+                $('[class^="itemRowWrapper___"]').each(function () {
+                    var currentItem = $(this),
+                        element = currentItem[0];
 
-                var {price, quantity, inputs} = value,
-                    {setPrices, setQuantities} = options;
-
-                // Cannot trigger this event with jquery for some reason?
-                // Has to be done in vanilla JS.
-                var event = new Event('input', {
-                    bubbles: true,
-                    cancelable: true,
-                });
-
-                // If prices are set to be automatically added.
-                if (setPrices.value) {
-                    inputs.price.val(price);
-                }
-
-                // If quantities are set to be automatically added.
-                if (setQuantities.value) {
-                    inputs.quantity.val(quantity);
-
-                    if (inputs.quantity.attr('type') === 'checkbox') {
-                        inputs.quantity.next('label').click();
-                    }
-                }
-
-                // Trigger update event.
-                _.each(inputs, function (input) {
-                    if (!input.length) {
+                    // Skip if already processed.
+                    if (processedElements.has(element)) {
                         return;
                     }
 
-                    input[0].dispatchEvent(event);
+                    var itemName = currentItem.find('[class^="name___"]').text();
+
+                    // Find matching item in our items list.
+                    var matchedItem = _.find(self.items, function (value) {
+                        return value.name === itemName;
+                    });
+
+                    if (!matchedItem) {
+                        return;
+                    }
+
+                    // Mark as processed.
+                    processedElements.add(element);
+
+                    // Get the inputs.
+                    var inputs = {
+                        price: currentItem.find('[class^="priceInputWrapper___"] input:not([type="hidden"])'),
+                        quantity: currentItem.find('[class^="amountInputWrapper___"] input:not([type="hidden"]), [class^="checkboxWrapper___"] [id*="selectCheckbox"]')
+                    };
+
+                    // Skip if no inputs found.
+                    if (!inputs.price.length) {
+                        return;
+                    }
+
+                    var event = new Event('input', {
+                        bubbles: true,
+                        cancelable: true,
+                    });
+
+                    // Apply price.
+                    if (setPrices.value) {
+                        inputs.price.val(matchedItem.price);
+                    }
+
+                    // Apply quantity.
+                    if (setQuantities.value) {
+                        inputs.quantity.val(matchedItem.quantity);
+
+                        if (inputs.quantity.attr('type') === 'checkbox') {
+                            inputs.quantity.next('label').click();
+                        }
+                    }
+
+                    // Trigger update events.
+                    _.each(inputs, function (input) {
+                        if (input.length) {
+                            input[0].dispatchEvent(event);
+                        }
+                    });
                 });
+            }
+
+            return new Promise(function (resolve) {
+                var scrollHeight = document.documentElement.scrollHeight,
+                    currentScroll = 0,
+                    scrollStep = window.innerHeight;
+
+                function scrollAndProcess() {
+                    // Update loader.
+                    self.loader.update('Applying prices...');
+
+                    // Process items at current scroll position.
+                    processVisibleItems();
+
+                    // Move to next scroll position.
+                    currentScroll += scrollStep;
+
+                    if (currentScroll < scrollHeight + scrollStep) {
+                        window.scrollTo(0, currentScroll);
+                        setTimeout(scrollAndProcess, 50);
+                    } else {
+                        // Done - scroll back to top.
+                        window.scrollTo(0, 0);
+                        resolve();
+                    }
+                }
+
+                // Start from top.
+                window.scrollTo(0, 0);
+                setTimeout(scrollAndProcess, 50);
             });
         }
     };
