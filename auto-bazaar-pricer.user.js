@@ -314,6 +314,45 @@ $(() => {
         },
 
         /**
+         * Fetch all inventory items with pagination support.
+         * @param currentTab {string|null} | Current tab filter, or null for all items.
+         * @returns {Promise<Array>} | Promise resolving to array of all inventory items.
+         */
+        getAllInventoryItems: async function (currentTab) {
+            var allItems = [],
+                type = currentTab || 'All',
+                start = 0,
+                loaded = false;
+
+            // Loop until the inventory is fully loaded.
+            while (!loaded) {
+                // Make the request.
+                var response = await fetch(`/inventory.php?rfcv=${unsafeWindow.getRFC()}`, {
+                    headers: {
+                        'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'x-requested-with': 'XMLHttpRequest'
+                    },
+                    body: `step=getList&type=${type}&start=${start}`,
+                    method: 'POST'
+                });
+
+                // Parse the response.
+                var data = await response.json();
+
+                // Add items from this page to our collection.
+                allItems = allItems.concat(data.list);
+
+                // Check if we've loaded all items.
+                loaded = data.loaded;
+
+                // Update start position for next request.
+                start = data.start;
+            }
+
+            return allItems;
+        },
+
+        /**
          * Grab all user items from API.
          */
         gatherItems: function () {
@@ -330,18 +369,8 @@ $(() => {
             // Show loader.
             self.loader.show();
 
-            // Get inventory.
-            var inventory = fetch(`/inventory.php?rfcv=${unsafeWindow.getRFC()}`, {
-                headers: {
-                    'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                    'x-requested-with': 'XMLHttpRequest'
-                },
-                body: `step=getList&type=${currentTab ? currentTab : 'All'}&start=0`,
-                method: 'POST'
-            });
-
-            // Loop over all inventory items.
-            inventory.then(response => response.json()).then(({ list }) => {
+            // Get all inventory items with pagination.
+            self.getAllInventoryItems(currentTab).then(list => {
                 // Loop over all items in players inventory.
                 list.forEach(function (value) {
                     var {name, itemID, type, Qty, averageprice, equiped, untradable} = value,
