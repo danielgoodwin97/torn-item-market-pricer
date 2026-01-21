@@ -21,7 +21,8 @@ This script needs:
 5. Go to `City > Item Market > Add Items > Configure`.
 6. In the configuration popup, paste your API key into the `Torn API Key` field.
 7. Close configuration popup to save.
-8. Click `Start FATU's Pricer` to begin scraping & pricing items.
+8. I would recommend scrolling down the page until your entire inventory is loaded in.
+9. Click `Start FATU's Pricer` to begin scraping & pricing items.
 
 ### Issues
 If you have any issues with the script, please either create an issue in this repository [here](https://github.com/danielgoodwin97/torn-bazaar-pricer/issues) or contact me in game [here](https://www.torn.com/messages.php#/p=compose&XID=1482556).
